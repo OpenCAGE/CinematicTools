@@ -267,3 +267,5 @@ __pycache__/
 !CT_AlienIsolation.dll
 CT_AlienIsolation.iobj
 CT_AlienIsolation.ipdb
+
+Build/CinematicTools.exe.config
