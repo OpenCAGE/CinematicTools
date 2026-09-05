@@ -51,11 +51,14 @@ public:
   void HotkeyUpdate();
   void Update(float dt);
   void DrawUI();
+  // The TRACK tab: nodes, playback and the timeline.
+  void DrawTrackUI();
   void DrawTrack() { if(m_CameraEnabled) m_TrackPlayer.DrawNodes(); }
 
   bool IsCameraEnabled() { return m_CameraEnabled; }
   bool IsGamepadDisabled() { return m_CameraEnabled && m_GamepadDisabled; };
   bool IsKbmDisabled() { return m_CameraEnabled && m_KbmDisabled; };
+  bool IsTrackVisible() { return m_CameraEnabled && m_TrackPlayer.IsTrackVisible(); }
 
   void ReadConfig(INIReader* pReader);
   const std::string GetConfig();
@@ -71,6 +74,9 @@ private:
 
   void ToggleCamera();
   void ResetCamera();
+
+  // Moves the camera to a state on a track, honouring the track's locks
+  void ApplyTrackNode(CatmullRomNode const& node);
 
   // Changes camera coordinates between global and
   // target relative space
@@ -106,6 +112,7 @@ private:
 
   Camera m_Camera;
   TrackPlayer m_TrackPlayer;
+  int m_SelectedTrackNode;
 
   boost::chrono::high_resolution_clock::time_point m_dtCameraUpdate;
   MouseBuffer m_MouseBuffer;

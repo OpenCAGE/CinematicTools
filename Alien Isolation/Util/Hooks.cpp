@@ -10,6 +10,7 @@
 
 // Function definitions
 typedef DWORD(WINAPI* tIDXGISwapChain_Present)(IDXGISwapChain*, UINT, UINT);
+typedef HRESULT(WINAPI* tIDXGISwapChain_ResizeBuffers)(IDXGISwapChain*, UINT, UINT, UINT, DXGI_FORMAT, UINT);
 typedef BOOL(WINAPI* tSetCursorPos)(int, int);
 
 typedef int(__thiscall* tCameraUpdate)(CATHODE::AICameraManager*);
@@ -36,12 +37,33 @@ DWORD WINAPI hIDXGISwapChain_Present(IDXGISwapChain* pSwapchain, UINT SyncInterv
   {
     g_mainHandle->GetUI()->BindRenderTarget();
     g_mainHandle->GetRenderer()->UpdateMatrices();
-    //g_mainHandle->GetCameraManager()->DrawTrack();
+    if (g_mainHandle->GetCameraManager()->IsTrackVisible())
+      g_mainHandle->GetCameraManager()->DrawTrack();
 
     g_mainHandle->GetUI()->Draw();
   }
 
   return oIDXGISwapChain_Present(pSwapchain, SyncInterval, Flags);
+}
+
+// The game resizes its backbuffers when the resolution or display mode changes.
+// In windowed fullscreen this can happen without the window itself changing size,
+// so WM_SIZE isn't a reliable signal. ResizeBuffers refuses to run while anything
+// still references a backbuffer, so release our render target view around the call.
+
+tIDXGISwapChain_ResizeBuffers oIDXGISwapChain_ResizeBuffers = nullptr;
+
+HRESULT WINAPI hIDXGISwapChain_ResizeBuffers(IDXGISwapChain* pSwapchain, UINT BufferCount, UINT Width, UINT Height, DXGI_FORMAT NewFormat, UINT SwapChainFlags)
+{
+  if (!g_shutdown)
+    g_mainHandle->GetUI()->OnSwapChainResizing();
+
+  HRESULT hr = oIDXGISwapChain_ResizeBuffers(pSwapchain, BufferCount, Width, Height, NewFormat, SwapChainFlags);
+
+  if (!g_shutdown)
+    g_mainHandle->GetUI()->OnSwapChainResized(hr);
+
+  return hr;
 }
 
 //////////////////////////
@@ -231,6 +253,7 @@ void util::hooks::Init()
   CreateHook("SetCursorPos", (int)GetProcAddress(GetModuleHandleA("user32.dll"), "SetCursorPos"), hSetCursorPos, &oSetCursorPos);
 
   CreateVTableHook("SwapChainPresent", (PDWORD*)g_dxgiSwapChain, hIDXGISwapChain_Present, 8, &oIDXGISwapChain_Present);
+  CreateVTableHook("SwapChainResizeBuffers", (PDWORD*)g_dxgiSwapChain, hIDXGISwapChain_ResizeBuffers, 13, &oIDXGISwapChain_ResizeBuffers);
 }
 
 // In some cases it's useful or even required to disable all hooks or just certain ones

@@ -41,9 +41,16 @@ static INT64                    g_Time = 0;
 static INT64                    g_TicksPerSecond = 0;
 static ImGuiMouseCursor         g_LastMouseCursor = ImGuiMouseCursor_COUNT;
 
+// Client-rect -> backbuffer scale. Window messages deliver mouse positions in client
+// coordinates, but everything ImGui draws is in backbuffer pixels. These differ whenever
+// the swap chain isn't the same size as the window (see ImGui_ImplDX11_NewFrame).
+static float                    g_MouseScaleX = 1.0f;
+static float                    g_MouseScaleY = 1.0f;
+
 // DirectX data
 static ID3D11Device*            g_pd3dDevice = NULL;
 static ID3D11DeviceContext*     g_pd3dDeviceContext = NULL;
+static IDXGISwapChain*          g_pSwapChain = NULL;
 static ID3D11Buffer*            g_pVB = NULL;
 static ID3D11Buffer*            g_pIB = NULL;
 static ID3D10Blob *             g_pVertexShaderBlob = NULL;
@@ -337,8 +344,8 @@ IMGUI_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND hwnd, UINT msg, WPARAM wPa
         io.MouseWheelH += GET_WHEEL_DELTA_WPARAM(wParam) > 0 ? +1.0f : -1.0f;
         return 0;
     case WM_MOUSEMOVE:
-        io.MousePos.x = (signed short)(lParam);
-        io.MousePos.y = (signed short)(lParam >> 16);
+        io.MousePos.x = (float)(signed short)(lParam) * g_MouseScaleX;
+        io.MousePos.y = (float)(signed short)(lParam >> 16) * g_MouseScaleY;
         return 0;
     case WM_KEYDOWN:
     case WM_SYSKEYDOWN:
@@ -546,11 +553,12 @@ void    ImGui_ImplDX11_InvalidateDeviceObjects()
     if (g_pVertexShaderBlob) { g_pVertexShaderBlob->Release(); g_pVertexShaderBlob = NULL; }
 }
 
-bool    ImGui_ImplDX11_Init(void* hwnd, ID3D11Device* device, ID3D11DeviceContext* device_context)
+bool    ImGui_ImplDX11_Init(void* hwnd, ID3D11Device* device, ID3D11DeviceContext* device_context, IDXGISwapChain* swap_chain)
 {
     g_hWnd = (HWND)hwnd;
     g_pd3dDevice = device;
     g_pd3dDeviceContext = device_context;
+    g_pSwapChain = swap_chain;
 
     if (!QueryPerformanceFrequency((LARGE_INTEGER *)&g_TicksPerSecond))
         return false;
@@ -595,7 +603,31 @@ void ImGui_ImplDX11_Shutdown()
     ImGui_ImplDX11_InvalidateDeviceObjects();
     g_pd3dDevice = NULL;
     g_pd3dDeviceContext = NULL;
+    g_pSwapChain = NULL;
     g_hWnd = (HWND)0;
+}
+
+// Size of the swap chain's backbuffer, which is what we actually render into.
+// Returns false if there's no swap chain or the buffer can't be queried.
+static bool ImGui_ImplDX11_GetBackbufferSize(float* out_width, float* out_height)
+{
+    if (!g_pSwapChain)
+        return false;
+
+    ID3D11Texture2D* pBackBuffer = NULL;
+    if (FAILED(g_pSwapChain->GetBuffer(0, __uuidof(ID3D11Texture2D), (void**)&pBackBuffer)) || !pBackBuffer)
+        return false;
+
+    D3D11_TEXTURE2D_DESC desc;
+    pBackBuffer->GetDesc(&desc);
+    pBackBuffer->Release();
+
+    if (desc.Width == 0 || desc.Height == 0)
+        return false;
+
+    *out_width = (float)desc.Width;
+    *out_height = (float)desc.Height;
+    return true;
 }
 
 void ImGui_ImplDX11_NewFrame()
@@ -605,10 +637,29 @@ void ImGui_ImplDX11_NewFrame()
 
     ImGuiIO& io = ImGui::GetIO();
 
-    // Setup display size (every frame to accommodate for window resizing)
+    // Setup display size (every frame to accommodate for window resizing).
+    // Prefer the backbuffer size: that's the surface we draw into and DXGI stretches it to
+    // the window on Present. The client rect can differ from it (windowed fullscreen at a
+    // non-desktop resolution, DPI virtualisation of a DPI-unaware process), in which case
+    // sizing from the client rect leaves the UI clipped/clamped to the wrong region and
+    // mouse hit-testing offset by the ratio between the two.
     RECT rect;
     GetClientRect(g_hWnd, &rect);
-    io.DisplaySize = ImVec2((float)(rect.right - rect.left), (float)(rect.bottom - rect.top));
+    float client_w = (float)(rect.right - rect.left);
+    float client_h = (float)(rect.bottom - rect.top);
+
+    float display_w, display_h;
+    if (ImGui_ImplDX11_GetBackbufferSize(&display_w, &display_h))
+    {
+        io.DisplaySize = ImVec2(display_w, display_h);
+        g_MouseScaleX = (client_w > 0.0f) ? display_w / client_w : 1.0f;
+        g_MouseScaleY = (client_h > 0.0f) ? display_h / client_h : 1.0f;
+    }
+    else
+    {
+        io.DisplaySize = ImVec2(client_w, client_h);
+        g_MouseScaleX = g_MouseScaleY = 1.0f;
+    }
 
     // Setup time step
     INT64 current_time;
@@ -629,7 +680,8 @@ void ImGui_ImplDX11_NewFrame()
     // Set OS mouse position if requested (only used when ImGuiConfigFlags_NavEnableSetMousePos is enabled by user)
     if (io.WantSetMousePos)
     {
-        POINT pos = { (int)io.MousePos.x, (int)io.MousePos.y };
+        // io.MousePos is in backbuffer space; convert back to client space before ClientToScreen
+        POINT pos = { (int)(io.MousePos.x / g_MouseScaleX), (int)(io.MousePos.y / g_MouseScaleY) };
         ClientToScreen(g_hWnd, &pos);
         SetCursorPos(pos.x, pos.y);
     }

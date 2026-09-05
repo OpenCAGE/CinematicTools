@@ -31,6 +31,7 @@ public:
 private:
   void LoadConfig();
   void SaveConfig();
+  void LogDisplayInfo();
 
   void OnMapChange();
 

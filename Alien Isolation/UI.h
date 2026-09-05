@@ -7,6 +7,7 @@ using namespace Microsoft::WRL;
 enum SelectedMenu
 {
   UIMenu_Camera,
+  UIMenu_Track,
   UIMenu_Visuals,
   UIMenu_Misc
 };
@@ -22,6 +23,8 @@ public:
 
   void Draw();
   void OnResize();
+  void OnSwapChainResizing();
+  void OnSwapChainResized(HRESULT hr);
   void Update(float dt);
 
   bool IsEnabled() { return m_Enabled; }

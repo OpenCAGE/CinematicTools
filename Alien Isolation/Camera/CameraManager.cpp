@@ -5,6 +5,7 @@
 
 #include <boost/filesystem.hpp>
 #include <boost/range/iterator_range.hpp>
+#include <fstream>
 #include <iostream>
 #include <Windows.h>
 
@@ -26,6 +27,7 @@ CameraManager::CameraManager() :
   m_SmoothMouse(true),
   m_Camera(),
   m_TrackPlayer(),
+  m_SelectedTrackNode(0),
   m_CharacterIndex(0),
   m_LockToCharacter(false),
   m_pCharacter(nullptr),
@@ -275,15 +277,6 @@ void CameraManager::DrawUI()
   ImGui::SetColumnOffset(-1, 552);
   ImGui::PushItemWidth(200);
 
-  m_TrackPlayer.DrawUI();
-
-  /////////////////////////////////////////////////
-  ////////////////////////////////////////////////
-
-  ImGui::NextColumn();
-  ImGui::SetColumnOffset(-1, 814);
-  ImGui::PushItemWidth(200);
-
   ImGui::Text("Camera profiles");
   if (ImGui::Combo("##CameraProfile", &m_SelectedProfile, ProfileNameGetter, static_cast<void*>(&m_Profiles), (int)m_Profiles.size()))
     m_Camera.Profile = m_Profiles[m_SelectedProfile];
@@ -483,6 +476,16 @@ void CameraManager::ToggleCamera()
   }
 
   m_CameraEnabled = !m_CameraEnabled;
+
+  // The game only streams zones around the player and what the camera can already see, so a free camera
+  // flies into unloaded areas. Ask the OpenCAGE runtime utils, if they are injected, to stream every zone
+  // while the camera is enabled.
+  if (HMODULE pRuntimeUtils = GetModuleHandleA("OpenCAGE_Utils.asi"))
+  {
+    typedef void(*tSetForceZoneLoading)(bool);
+    if (tSetForceZoneLoading pSetForceZoneLoading = reinterpret_cast<tSetForceZoneLoading>(GetProcAddress(pRuntimeUtils, "OpenCAGE_SetForceZoneLoading")))
+      pSetForceZoneLoading(m_CameraEnabled);
+  }
 }
 
 void CameraManager::ResetCamera()
@@ -609,4 +612,146 @@ void CameraManager::ToggleHUD()
         pObject->m_ForceHide = m_HideUI;
     }
   }
+}
+void CameraManager::ApplyTrackNode(CatmullRomNode const& node)
+{
+  m_Camera.Position = node.Position;
+  if (m_TrackPlayer.IsRotationLocked())
+    m_Camera.Rotation = node.Rotation;
+  if (m_TrackPlayer.IsFovLocked())
+    m_Camera.Profile.FieldOfView = node.FieldOfView;
+  if (m_TrackPlayer.IsDofLocked())
+  {
+    m_Camera.Profile.FocusDistance = node.FocusDistance;
+    m_Camera.Profile.DofScale = node.DofScale;
+    m_Camera.Profile.DofStrength = node.DofStrength;
+  }
+}
+
+void CameraManager::DrawTrackUI()
+{
+  ImGuiIO& io = ImGui::GetIO();
+  std::vector<CatmullRomNode> const& nodes = m_TrackPlayer.GetNodes();
+  const int nodeCount = static_cast<int>(nodes.size());
+  if (m_SelectedTrackNode >= nodeCount)
+    m_SelectedTrackNode = nodeCount > 0 ? nodeCount - 1 : 0;
+
+  ImGui::PushFont(io.Fonts->Fonts[4]);
+  ImGui::Dummy(ImVec2(0, 10));
+  ImGui::Columns(4, 0, false);
+  ImGui::NextColumn();
+  ImGui::SetColumnOffset(-1, 12);
+  ImGui::PushItemWidth(200);
+
+  m_TrackPlayer.DrawUI();
+
+  /////////////////////////////////////////////////
+  ////////////////////////////////////////////////
+
+  ImGui::NextColumn();
+  ImGui::SetColumnOffset(-1, 290);
+  ImGui::PushItemWidth(230);
+
+  ImGui::Text("Nodes");
+
+  // One line per node, showing its time on the track.
+  std::vector<std::string> nodeLabels;
+  std::vector<const char*> nodeLabelPtrs;
+  for (int i = 0; i < nodeCount; ++i)
+  {
+    char label[64];
+    sprintf_s(label, "Node %d   %.2f s", i + 1, nodes[i].TimeStamp);
+    nodeLabels.push_back(label);
+  }
+  for (auto const& label : nodeLabels)
+    nodeLabelPtrs.push_back(label.c_str());
+
+  if (nodeCount > 0)
+    ImGui::ListBox("##TrackNodes", &m_SelectedTrackNode, &nodeLabelPtrs[0], nodeCount, 7);
+  else
+    ImGui::TextDisabled("No nodes yet - enable the camera and add one");
+
+  ImGui::Dummy(ImVec2(0, 5));
+  if (ImGui::Button("Add node", ImVec2(110, 25)) && m_CameraEnabled)
+  {
+    m_TrackPlayer.CreateNode(m_Camera);
+    m_SelectedTrackNode = static_cast<int>(m_TrackPlayer.GetNodes().size()) - 1;
+  }
+  ImGui::SameLine(0, 10);
+  if (ImGui::Button("Delete node", ImVec2(110, 25)) && nodeCount > 0)
+    m_TrackPlayer.DeleteNode(static_cast<size_t>(m_SelectedTrackNode));
+
+  if (ImGui::Button("Update node", ImVec2(110, 25)) && nodeCount > 0 && m_CameraEnabled)
+    m_TrackPlayer.UpdateNode(static_cast<size_t>(m_SelectedTrackNode), m_Camera);
+  ImGui::SameLine(0, 10);
+  if (ImGui::Button("Go to node", ImVec2(110, 25)) && nodeCount > 0 && m_CameraEnabled && !m_TrackPlayer.IsPlaying())
+  {
+    m_TrackPlayer.Seek(nodes[m_SelectedTrackNode].TimeStamp);
+    ApplyTrackNode(nodes[m_SelectedTrackNode]);
+  }
+
+  if (nodeCount > 0)
+  {
+    ImGui::Dummy(ImVec2(0, 5));
+    ImGui::Text("Node time");
+    float nodeTime = nodes[m_SelectedTrackNode].TimeStamp;
+    if (ImGui::InputFloat("##TrackNodeTime", &nodeTime, 0.1f, 1.0f, 2))
+      m_TrackPlayer.SetNodeTime(static_cast<size_t>(m_SelectedTrackNode), nodeTime);
+  }
+
+  /////////////////////////////////////////////////
+  ////////////////////////////////////////////////
+
+  ImGui::NextColumn();
+  ImGui::SetColumnOffset(-1, 552);
+  ImGui::PushItemWidth(480);
+
+  ImGui::Text("Playback");
+
+  const bool canPlay = nodeCount > 1 && m_CameraEnabled;
+  ImGui::PushStyleColor(ImGuiCol_Border, ImVec4(1, 1, 1, 1));
+  ImGui::PushStyleVar(ImGuiStyleVar_FrameBorderSize, 1.f);
+  if (ImGui::ToggleButton(m_TrackPlayer.IsPlaying() ? "Stop" : "Play", ImVec2(100, 30), m_TrackPlayer.IsPlaying(), true) && canPlay)
+    m_TrackPlayer.Toggle();
+  ImGui::PopStyleVar();
+  ImGui::PopStyleColor();
+  ImGui::SameLine(0, 10);
+  if (ImGui::Button("To start", ImVec2(100, 30)) && nodeCount > 0)
+  {
+    m_TrackPlayer.Stop();
+    m_TrackPlayer.Seek(0);
+    if (m_CameraEnabled)
+      ApplyTrackNode(m_TrackPlayer.Evaluate(0));
+  }
+
+  if (!m_CameraEnabled)
+    ImGui::TextDisabled("Enable the camera to play a track");
+  else if (nodeCount < 2)
+    ImGui::TextDisabled("A track needs at least two nodes");
+
+  // Timeline: dragging it scrubs the camera along the track while not playing.
+  ImGui::Dummy(ImVec2(0, 5));
+  const float duration = m_TrackPlayer.GetDuration();
+  float time = m_TrackPlayer.GetTime();
+  if (ImGui::SliderFloat("##TrackTimeline", &time, 0.f, duration > 0 ? duration : 1.f, "%.2f s") && nodeCount > 1)
+  {
+    m_TrackPlayer.Seek(time);
+    if (!m_TrackPlayer.IsPlaying() && m_CameraEnabled)
+      ApplyTrackNode(m_TrackPlayer.Evaluate(time));
+  }
+
+  // Node markers along the slider.
+  ImVec2 sliderMin = ImGui::GetItemRectMin();
+  ImVec2 sliderMax = ImGui::GetItemRectMax();
+  ImDrawList* drawList = ImGui::GetWindowDrawList();
+  for (int i = 0; i < nodeCount && duration > 0; ++i)
+  {
+    float x = sliderMin.x + (sliderMax.x - sliderMin.x) * (nodes[i].TimeStamp / duration);
+    ImU32 colour = i == m_SelectedTrackNode ? 0xFF1C79E5 : 0xFFFFFFFF;
+    drawList->AddLine(ImVec2(x, sliderMax.y + 2), ImVec2(x, sliderMax.y + 8), colour, 2.f);
+  }
+  ImGui::Dummy(ImVec2(0, 10));
+  ImGui::Text("%.2f / %.2f s", time, duration);
+
+  ImGui::PopFont();
 }

@@ -61,14 +61,6 @@ bool Main::Initialize()
   util::log::Init();
   util::log::Write("Cinematic Tools for %s\n", g_gameName);
 
-  // Needed for ImGui + other functionality
-  g_gameHwnd = FindWindowA(g_className, NULL);
-  if (g_gameHwnd == NULL)
-  {
-    util::log::Error("Failed to retrieve window handle, GetLastError 0x%X", GetLastError());
-    return false;
-  }
-
   // Used for relative offsets
   g_gameHandle = GetModuleHandleA(g_moduleName);
   if (g_gameHandle == NULL)
@@ -88,6 +80,23 @@ bool Main::Initialize()
     util::log::Error("Device 0x%X DeviceContext 0x%X SwapChain 0x%X", g_d3d11Device, g_d3d11Context, g_dxgiSwapChain);
     return false;
   }
+
+  // Needed for ImGui + other functionality. Prefer the window the swap chain
+  // actually presents to over a class-name lookup, so input and rendering are
+  // guaranteed to refer to the same window.
+  DXGI_SWAP_CHAIN_DESC swapChainDesc{ 0 };
+  if (SUCCEEDED(g_dxgiSwapChain->GetDesc(&swapChainDesc)) && swapChainDesc.OutputWindow != NULL)
+    g_gameHwnd = swapChainDesc.OutputWindow;
+  else
+    g_gameHwnd = FindWindowA(g_className, NULL);
+
+  if (g_gameHwnd == NULL)
+  {
+    util::log::Error("Failed to retrieve window handle, GetLastError 0x%X", GetLastError());
+    return false;
+  }
+
+  LogDisplayInfo();
 
   // This disables the object glow thing
   BYTE GlowPatch[7] = { 0x80, 0xB9, 0x65, 0x70, 0x02, 0x00, 0x01 };
@@ -165,6 +174,43 @@ void Main::Run()
 void Main::OnConfigChanged()
 {
   m_ConfigChanged = true;
+}
+
+void Main::LogDisplayInfo()
+{
+  // Diagnostics for display-mode issues (see OpenCAGE issue #404): the game is
+  // DPI-unaware and in windowed fullscreen its backbuffer follows the chosen
+  // resolution rather than the window, so record everything that can differ.
+
+  RECT clientRect{ 0 }, windowRect{ 0 };
+  GetClientRect(g_gameHwnd, &clientRect);
+  GetWindowRect(g_gameHwnd, &windowRect);
+
+  DXGI_SWAP_CHAIN_DESC swapChainDesc{ 0 };
+  g_dxgiSwapChain->GetDesc(&swapChainDesc);
+
+  // GetDpiForWindow only exists on Windows 10 1607+, so resolve it at runtime
+  typedef UINT(WINAPI* tGetDpiForWindow)(HWND);
+  UINT dpi = 0;
+  if (HMODULE hUser32 = GetModuleHandleA("user32.dll"))
+  {
+    tGetDpiForWindow pGetDpiForWindow = (tGetDpiForWindow)GetProcAddress(hUser32, "GetDpiForWindow");
+    if (pGetDpiForWindow)
+      dpi = pGetDpiForWindow(g_gameHwnd);
+  }
+
+  util::log::Write("Window 0x%X: client %dx%d, window %dx%d at (%d,%d), DPI %u, screen %dx%d",
+    g_gameHwnd,
+    clientRect.right - clientRect.left, clientRect.bottom - clientRect.top,
+    windowRect.right - windowRect.left, windowRect.bottom - windowRect.top,
+    windowRect.left, windowRect.top,
+    dpi,
+    GetSystemMetrics(SM_CXSCREEN), GetSystemMetrics(SM_CYSCREEN));
+
+  util::log::Write("SwapChain: backbuffer %ux%u, %s, output window 0x%X",
+    swapChainDesc.BufferDesc.Width, swapChainDesc.BufferDesc.Height,
+    swapChainDesc.Windowed ? "windowed" : "fullscreen",
+    swapChainDesc.OutputWindow);
 }
 
 void Main::LoadConfig()

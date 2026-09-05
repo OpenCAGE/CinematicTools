@@ -6,7 +6,14 @@ This is a continuation of the Alien: Isolation Cinematic Tools by [Hattiwatti](h
 
 The project must be built in release mode, for x86 systems. This is the default project configuration.
 
-Use Visual Studio VC 140 to compile, and make sure to have restored all Nuget packages.
+Open `Alien Isolation\CT_AlienIsolation.sln` in Visual Studio 2022 (v143 toolset) and restore the NuGet packages (Boost, DirectXTK and MinHook all come from NuGet - nothing needs placing next to the repository). From the command line:
+
+```
+nuget restore "Alien Isolation\CT_AlienIsolation.sln"
+msbuild "Alien Isolation\CT_AlienIsolation.vcxproj" /p:Configuration=Release /p:Platform=Win32 /p:SolutionDir=<full path to the Alien Isolation folder>\r
+```
+
+The DLL is written to `Build\CT_AlienIsolation.dll`.
 
 ### How to use
 

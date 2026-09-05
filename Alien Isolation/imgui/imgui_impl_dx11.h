@@ -10,8 +10,13 @@
 
 struct ID3D11Device;
 struct ID3D11DeviceContext;
+struct IDXGISwapChain;
 
-IMGUI_API bool        ImGui_ImplDX11_Init(void* hwnd, ID3D11Device* device, ID3D11DeviceContext* device_context);
+// swap_chain is optional. When given, io.DisplaySize is taken from the swap chain's backbuffer
+// instead of the window's client rect, and mouse coordinates are rescaled from client space to
+// backbuffer space. This matters when the two differ (windowed fullscreen with a resolution that
+// isn't the desktop's, DPI-unaware game on a scaled display, etc.).
+IMGUI_API bool        ImGui_ImplDX11_Init(void* hwnd, ID3D11Device* device, ID3D11DeviceContext* device_context, IDXGISwapChain* swap_chain = NULL);
 IMGUI_API void        ImGui_ImplDX11_Shutdown();
 IMGUI_API void        ImGui_ImplDX11_NewFrame();
 IMGUI_API void        ImGui_ImplDX11_RenderDrawData(ImDrawData* draw_data);

@@ -45,7 +45,7 @@ bool UI::Initialize()
   // https://github.com/ocornut/imgui
 
   ImGui::CreateContext();
-  if (!ImGui_ImplDX11_Init(g_gameHwnd, g_d3d11Device, g_d3d11Context))
+  if (!ImGui_ImplDX11_Init(g_gameHwnd, g_d3d11Device, g_d3d11Context, g_dxgiSwapChain))
   {
     util::log::Error("ImGui Dx11 implementation failed to initialize");
     return false;
@@ -144,13 +144,16 @@ void UI::Draw()
     // juuuuust to make sure the game's done with resizing stuff.
 
     m_FramesToSkip -= 1;
-    if (m_FramesToSkip == 0)
+    if (m_FramesToSkip <= 0)
     {
       m_IsResizing = false;
       CreateRenderTarget();
     }
     return;
   }
+
+  if (!m_pRTV && !CreateRenderTarget())
+    return;
 
   g_d3d11Context->OMSetRenderTargets(1, m_pRTV.GetAddressOf(), nullptr);
 
@@ -179,6 +182,10 @@ void UI::Draw()
       m_SelectedMenu = UIMenu_Camera;
 
     ImGui::SameLine(0, 20);
+    if (ImGui::ToggleButton("TRACK", ImVec2(158, 33), m_SelectedMenu == UIMenu_Track, false))
+      m_SelectedMenu = UIMenu_Track;
+
+    ImGui::SameLine(0, 20);
     if (ImGui::ToggleButton("VISUALS", ImVec2(158, 33), m_SelectedMenu == UIMenu_Visuals, false))
       m_SelectedMenu = UIMenu_Visuals;
 
@@ -191,6 +198,7 @@ void UI::Draw()
     ImGui::GetWindowDrawList()->AddLine(ImVec2(windowPos.x + 143, windowPos.y + 76), ImVec2(windowPos.x + 301, windowPos.y + 76), 0xFF1C79E5, 2);
     ImGui::GetWindowDrawList()->AddLine(ImVec2(windowPos.x + 321, windowPos.y + 76), ImVec2(windowPos.x + 479, windowPos.y + 76), 0xFF1C79E5, 2);
     ImGui::GetWindowDrawList()->AddLine(ImVec2(windowPos.x + 499, windowPos.y + 76), ImVec2(windowPos.x + 657, windowPos.y + 76), 0xFF1C79E5, 2);
+    ImGui::GetWindowDrawList()->AddLine(ImVec2(windowPos.x + 677, windowPos.y + 76), ImVec2(windowPos.x + 835, windowPos.y + 76), 0xFF1C79E5, 2);
 
     ImGui::Dummy(ImVec2(0, 50));
     ImGui::Dummy(ImVec2(0, 0));
@@ -201,6 +209,8 @@ void UI::Draw()
       
       if (m_SelectedMenu == UIMenu_Camera)
         g_mainHandle->GetCameraManager()->DrawUI();
+      else if (m_SelectedMenu == UIMenu_Track)
+        g_mainHandle->GetCameraManager()->DrawTrackUI();
       else if (m_SelectedMenu == UIMenu_Visuals)
       {
         g_mainHandle->GetVisualsController()->DrawUI();
@@ -259,11 +269,42 @@ void UI::OnResize()
   // However it's bound to the UI's RenderTarget (CreateRenderTarget()), so
   // it needs to be released before the backbuffer can be resized.
   // Failing to handle this will usually result in a crash.
+  //
+  // This is the WM_SIZE path. It's a fallback only: the swap chain can be
+  // resized without the window changing size (windowed fullscreen with a
+  // different resolution), so the authoritative release/recreate happens
+  // around IDXGISwapChain::ResizeBuffers in OnSwapChainResizing/Resized.
 
   m_IsResizing = true;
   m_FramesToSkip = 100;
   if (m_pRTV)
     m_pRTV.Reset();
+}
+
+void UI::OnSwapChainResizing()
+{
+  // Called just before the game calls IDXGISwapChain::ResizeBuffers.
+  // ResizeBuffers fails (DXGI_ERROR_INVALID_CALL) if anything still holds
+  // a reference to a backbuffer, so drop ours now.
+  m_IsResizing = true;
+  if (m_pRTV)
+    m_pRTV.Reset();
+}
+
+void UI::OnSwapChainResized(HRESULT hr)
+{
+  // Called right after ResizeBuffers returned. The new backbuffer exists
+  // now, so there's no need to wait; recreate the view on the next Draw.
+  if (SUCCEEDED(hr))
+  {
+    m_IsResizing = false;
+    m_FramesToSkip = 0;
+  }
+  else
+  {
+    util::log::Error("IDXGISwapChain::ResizeBuffers failed, HRESULT 0x%X", hr);
+    m_FramesToSkip = 100;
+  }
 }
 
 void UI::Update(float dt)
@@ -297,6 +338,19 @@ bool UI::CreateRenderTarget()
     util::log::Error("CreateRenderTargetView failed, HRESULT 0x%X", hr);
     return false;
   }
+
+  // Log the backbuffer against the window so size mismatches are visible in CT.log
+  D3D11_TEXTURE2D_DESC bbDesc;
+  pBackBuffer->GetDesc(&bbDesc);
+
+  RECT clientRect{ 0 };
+  GetClientRect(g_gameHwnd, &clientRect);
+  int clientW = clientRect.right - clientRect.left;
+  int clientH = clientRect.bottom - clientRect.top;
+
+  util::log::Write("Render target: backbuffer %ux%u, window client %dx%d%s",
+    bbDesc.Width, bbDesc.Height, clientW, clientH,
+    ((int)bbDesc.Width != clientW || (int)bbDesc.Height != clientH) ? " (mismatch, UI will be scaled to the backbuffer)" : "");
 
   return true;
 }
