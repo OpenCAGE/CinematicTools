@@ -95,9 +95,19 @@ void CTRenderer::UpdateMatrices()
   XMVECTOR qRotation = XMLoadFloat4(&camera.AbsoluteRotation);
   XMVECTOR vEyePos = XMLoadFloat3(&camera.AbsolutePosition);
 
-  XMMATRIX rotMatrix = XMMatrixRotationQuaternion(qRotation);
-  XMMATRIX viewMatrix = XMMatrixLookToRH(vEyePos, rotMatrix.r[2], XMVectorSet(0, 1, 0, 0));
-  XMMATRIX projMatrix = XMMatrixPerspectiveFovRH(camera.Profile.FieldOfView, 1920 / 1080.f, 0.01f, 1000.f);
+  XMMATRIX viewMatrix, projMatrix;
+  XMFLOAT4X4* pGameMatrices = CATHODE::GetCameraMatrix();
+  if (pGameMatrices)
+  {
+    viewMatrix = XMLoadFloat4x4(pGameMatrices);
+    projMatrix = XMLoadFloat4x4(pGameMatrices + 1);
+  }
+  else
+  {
+    XMMATRIX rotMatrix = XMMatrixRotationQuaternion(qRotation);
+    viewMatrix = XMMatrixLookToRH(vEyePos, rotMatrix.r[2], XMVectorSet(0, 1, 0, 0));
+    projMatrix = XMMatrixPerspectiveFovRH(XMConvertToRadians(camera.Profile.FieldOfView), 1920 / 1080.f, 0.01f, 1000.f);
+  }
 
   m_Matrices.EyePosition = XMFLOAT4(camera.AbsolutePosition.x, camera.AbsolutePosition.y, camera.AbsolutePosition.z, 1);
   XMStoreFloat4x4(&m_Matrices.View, viewMatrix);
@@ -202,10 +212,11 @@ std::unique_ptr<Model> CTRenderer::CreateModelFromResource(int id)
 void CTRenderer::DrawLines(ID3D11Buffer* pIndexBuffer, ID3D11Buffer* pVertexBuffer, unsigned int indexCount)
 {
   m_Shaders->UseShader("LineShader");
+  g_d3d11Context->RSSetState(m_CommonStates->CullNone());
+  g_d3d11Context->OMSetDepthStencilState(m_DepthStenciLState.Get(), 0);
   g_d3d11Context->GSSetConstantBuffers(0, 1, m_MatrixBuffer.GetAddressOf());
   g_d3d11Context->VSSetConstantBuffers(0, 1, m_MatrixBuffer.GetAddressOf());
   g_d3d11Context->PSSetConstantBuffers(0, 1, m_MatrixBuffer.GetAddressOf());
-  //g_d3d11Context->OMSetDepthStencilState(m_DepthStenciLState.Get(), 0);
 
   const UINT strides = 0x1C;
   const UINT offsets = 0;
@@ -227,6 +238,7 @@ void CTRenderer::DrawModel(DirectX::Model* pModel, DirectX::XMMATRIX const& tran
   pModel->Draw(g_d3d11Context, *m_CommonStates, transform, XMLoadFloat4x4(&m_Matrices.View), XMLoadFloat4x4(&m_Matrices.Projection), false, [=]
   {
     m_ModelEffect->Apply(g_d3d11Context);
+    g_d3d11Context->RSSetState(m_CommonStates->CullNone());
     g_d3d11Context->OMSetDepthStencilState(m_DepthStenciLState.Get(), 0);
   });
 }

@@ -342,13 +342,17 @@ namespace CATHODE
     }
   };
 
+  // Main POV: view matrix at +0, projection at +0x40 (row-vector convention, same as DirectXMath)
   static XMFLOAT4X4* GetCameraMatrix()
   {
-    typedef XMFLOAT4X4*(__thiscall* tGetMatrix)(int _this);
-    tGetMatrix GetMatrix = (tGetMatrix)(util::offsets::GetOffset("OFFSET_GETCAMERAMATRIX"));
+    typedef XMFLOAT4X4*(__thiscall* tFindMainPov)(int _this);
+    tFindMainPov FindMainPov = (tFindMainPov)(util::offsets::GetOffset("OFFSET_GETCAMERAMATRIX"));
 
-    int unkPointer = *(int*)((int)GetModuleHandleA("AI.exe") + 0x1366A00);
-    return GetMatrix(unkPointer);
+    int pPovManager = *(int*)(util::offsets::GetOffset("OFFSET_POVMANAGER"));
+    if (!pPovManager)
+      return nullptr;
+
+    return FindMainPov(pPovManager);
   }
 
   static void ShowMouse(bool val)
