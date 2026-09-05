@@ -22,13 +22,13 @@ struct CameraProfile
 {
   std::string Name{ "Default" };
   float FieldOfView{ 50.f };
-  float MovementSpeed{ 1.0f };
+  float MovementSpeed{ 3.0f };
   float RotationSpeed{ DirectX::XM_PI / 4 };
   float RollSpeed{ DirectX::XM_PI / 8 };
   float FovSpeed{ 5.0f };
   float DofScale{ 1.0f };
-  float DofStrength{ 0.04f };
-  float FocusDistance{ 2.f };
+  float DofStrength{ 0.f };
+  float FocusDistance{ 5.f };
 };
 
 struct Camera

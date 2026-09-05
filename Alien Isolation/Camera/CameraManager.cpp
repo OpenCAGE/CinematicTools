@@ -537,13 +537,13 @@ void CameraManager::LoadProfiles()
 
     CameraProfile profile;
     profile.Name = reader.Get("CameraProfile", "Name", "UNKNOWN");
-    profile.MovementSpeed = static_cast<float>( reader.GetReal("CameraProfile", "MovementSpeed", 1.0f) );
+    profile.MovementSpeed = static_cast<float>( reader.GetReal("CameraProfile", "MovementSpeed", 3.0f) );
     profile.RotationSpeed = static_cast<float>( reader.GetReal("CameraProfile", "RotationSpeed", XM_PI / 4) );
     profile.RollSpeed = static_cast<float>( reader.GetReal("CameraProfile", "RollSpeed", XM_PI / 8) );
     profile.FovSpeed = static_cast<float>( reader.GetReal("CameraProfile", "FovSpeed", 5.0f) );
     profile.FieldOfView = static_cast<float>( reader.GetReal("CameraProfile", "FieldOfView", 50.0f) );
-    profile.FocusDistance = static_cast<float>( reader.GetReal("CameraProfile", "FocusDistance", 2.0f) );
-    profile.DofStrength = static_cast<float>( reader.GetReal("CameraProfile", "DofStrength", 0.04f) );
+    profile.FocusDistance = static_cast<float>( reader.GetReal("CameraProfile", "FocusDistance", 5.0f) );
+    profile.DofStrength = static_cast<float>( reader.GetReal("CameraProfile", "DofStrength", 0.0f) );
     profile.DofScale = static_cast<float>( reader.GetReal("CameraProfile", "DofScale", 1.0f) );
 
     m_Profiles.emplace_back(profile);
