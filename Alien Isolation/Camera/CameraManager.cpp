@@ -479,8 +479,11 @@ void CameraManager::ToggleCamera()
 
   // The game only streams zones around the player and what the camera can already see, so a free camera
   // flies into unloaded areas. Ask the OpenCAGE runtime utils, if they are injected, to stream every zone
-  // while the camera is enabled.
-  if (HMODULE pRuntimeUtils = GetModuleHandleA("OpenCAGE_Utils.asi"))
+  // while the camera is enabled. Older OpenCAGE builds named them OpenCAGE_Utils.asi.
+  HMODULE pRuntimeUtils = GetModuleHandleA("OpenCAGE.RuntimeUtils.asi");
+  if (!pRuntimeUtils)
+    pRuntimeUtils = GetModuleHandleA("OpenCAGE_Utils.asi");
+  if (pRuntimeUtils)
   {
     typedef void(*tSetForceZoneLoading)(bool);
     if (tSetForceZoneLoading pSetForceZoneLoading = reinterpret_cast<tSetForceZoneLoading>(GetProcAddress(pRuntimeUtils, "OpenCAGE_SetForceZoneLoading")))
