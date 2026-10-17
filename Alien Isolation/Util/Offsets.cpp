@@ -13,28 +13,41 @@ namespace
   bool m_UseScannedResults = false;
   std::unordered_map<std::string, util::offsets::Signature> m_Signatures;
 
+  // The Steam, GOG and Epic Games Store releases of the game run the same code, but each was built separately, so
+  // their code and data sit at different addresses. Each offset is listed once per release.
+  util::offsets::GameBuild m_Build = util::offsets::GameBuild::Unknown;
+
+  struct BuildOffsets
+  {
+    int Steam;
+    int GOG;
+    int Epic;
+  };
+
   // Fill with hardcoded offsets if you don't want to use scanning
   // These should be relative to the module base.
-  std::unordered_map<std::string, int> m_HardcodedOffsets = map_list_of
-  ("OFFSET_D3D", 0x17DF5CC)
-  ("OFFSET_MAIN", 0x12F0C88)
+  //                                                         Steam      GOG        Epic Games Store
+  std::unordered_map<std::string, BuildOffsets> m_HardcodedOffsets = map_list_of
+  ("OFFSET_D3D",                 BuildOffsets{ 0x17DF5CC, 0x17F980C, 0x17EF77C })
+  ("OFFSET_MAIN",                BuildOffsets{ 0x12F0C88, 0x130AEC8, 0x130D1A8 })
 
-  ("OFFSET_CAMERAUPDATE", 0x32300)
-  ("OFFSET_GETCAMERAMATRIX", 0x5B0B40)
-  ("OFFSET_POVMANAGER", 0x1366A00)
-  ("OFFSET_POSTPROCESSUPDATE", 0x608C50)
-  ("OFFSET_TONEMAPUPDATE", 0x208490)
+  ("OFFSET_CAMERAUPDATE",        BuildOffsets{ 0x0032300, 0x00321C0, 0x0041CC0 })
+  ("OFFSET_GETCAMERAMATRIX",     BuildOffsets{ 0x05B0B40, 0x05B0D40, 0x0502C60 })
+  ("OFFSET_POVMANAGER",          BuildOffsets{ 0x1366A00, 0x1380C40, 0x1376BB0 })
+  ("OFFSET_POSTPROCESSUPDATE",   BuildOffsets{ 0x0608C50, 0x0608D70, 0x055B0B0 })
+  ("OFFSET_TONEMAPUPDATE",       BuildOffsets{ 0x0208490, 0x02086F0, 0x0218970 })
 
-  ("OFFSET_INPUTUPDATE", 0x57D6C0)
-  ("OFFSET_GAMEPADUPDATE", 0x60EE30)
-  ("OFFSET_COMBATMANAGERUPDATE", 0x37A800)
+  ("OFFSET_INPUTUPDATE",         BuildOffsets{ 0x057D6C0, 0x057D640, 0x04CF4D0 })
+  ("OFFSET_GAMEPADUPDATE",       BuildOffsets{ 0x060EE30, 0x060F130, 0x0561300 })
+  ("OFFSET_COMBATMANAGERUPDATE", BuildOffsets{ 0x037A800, 0x037A9B0, 0x038B340 })
 
-  ("OFFSET_SHOWMOUSE", 0x1359B44)
-  ("OFFSET_DRAWUI", 0x1240F27)
-  ("OFFSET_FREEZETIME", 0x12F194C)
-  ("OFFSET_SCALEFORM", 0x134A78C)
-  ("OFFSET_TIMESCALE", 0xDC6EA0)
-  ("OFFSET_POSTPROCESS", 0x15D0970);
+  ("OFFSET_SHOWMOUSE",           BuildOffsets{ 0x1359B44, 0x1373D84, 0x1369CF4 })
+  ("OFFSET_DRAWUI",              BuildOffsets{ 0x1240F27, 0x125AF27, 0x125CEE7 })
+  ("OFFSET_FREEZETIME",          BuildOffsets{ 0x12F194C, 0x130BB8C, 0x130DE6C })
+  ("OFFSET_SCALEFORM",           BuildOffsets{ 0x134A78C, 0x13649CC, 0x1366CAC })
+  ("OFFSET_TIMESCALE",           BuildOffsets{ 0x0DC6EA0, 0x0DDDEF0, 0x0DDDF90 })
+  ("OFFSET_POSTPROCESS",         BuildOffsets{ 0x15D0970, 0x15EABB0, 0x15E0B20 })
+  ("OFFSET_GLOWPATCH",           BuildOffsets{ 0x03A3494, 0x03A3594, 0x03B4254 });
 
   bool DataCompare(BYTE* pData, BYTE* bSig, const char* szMask)
   {
@@ -197,8 +210,53 @@ int util::offsets::GetOffset(std::string const& name)
 
   auto hardcodedResult = m_HardcodedOffsets.find(name);
   if (hardcodedResult != m_HardcodedOffsets.end())
-    return hardcodedResult->second + (int)g_gameHandle;
+  {
+    BuildOffsets const& offsets = hardcodedResult->second;
+    switch (m_Build)
+    {
+      case GameBuild::Steam: return offsets.Steam + (int)g_gameHandle;
+      case GameBuild::GOG: return offsets.GOG + (int)g_gameHandle;
+      case GameBuild::Epic: return offsets.Epic + (int)g_gameHandle;
+    }
+
+    util::log::Error("Offset %s is not known for this release of the game", name.c_str());
+    return 0;
+  }
 
   util::log::Error("Offset %s does not exist", name.c_str());
   return 0;
+}
+
+util::offsets::GameBuild util::offsets::DetectBuild()
+{
+  // Each release is told apart by when its exe was linked and how big it is in memory
+  const IMAGE_DOS_HEADER* pDosHeader = reinterpret_cast<const IMAGE_DOS_HEADER*>(g_gameHandle);
+  const IMAGE_NT_HEADERS* pNtHeaders = reinterpret_cast<const IMAGE_NT_HEADERS*>(reinterpret_cast<const BYTE*>(g_gameHandle) + pDosHeader->e_lfanew);
+  const DWORD timeStamp = pNtHeaders->FileHeader.TimeDateStamp;
+  const DWORD imageSize = pNtHeaders->OptionalHeader.SizeOfImage;
+
+  if (timeStamp == 0x54E3199D && imageSize == 0x01F81000)
+    m_Build = GameBuild::Steam;
+  else if (timeStamp == 0x62952F34 && imageSize == 0x01F9D000)
+    m_Build = GameBuild::GOG;
+  else if (timeStamp == 0x5FD25676 && imageSize == 0x01F9F000)
+    m_Build = GameBuild::Epic;
+  else
+  {
+    m_Build = GameBuild::Unknown;
+    util::log::Error("AI.exe linked 0x%X, 0x%X bytes in memory", timeStamp, imageSize);
+  }
+
+  return m_Build;
+}
+
+const char* util::offsets::BuildName()
+{
+  switch (m_Build)
+  {
+    case GameBuild::Steam: return "Steam";
+    case GameBuild::GOG: return "GOG";
+    case GameBuild::Epic: return "Epic Games Store";
+  }
+  return "unknown";
 }

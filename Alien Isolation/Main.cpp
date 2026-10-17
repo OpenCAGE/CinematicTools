@@ -69,8 +69,30 @@ bool Main::Initialize()
     return false;
   }
 
-  g_dxgiSwapChain = CATHODE::D3D::Singleton()->m_pSwapChain;//fb::DxRenderer::Singleton()->m_pScreen->m_pSwapChain; // Fetch SwapChain
-  g_d3d11Device = CATHODE::D3D::Singleton()->m_pDevice;// fb::DxRenderer::Singleton()->m_pDevice; // Fetch ID3D11Device
+  // The offsets are known for the Steam, GOG and Epic Games Store releases. Any other AI.exe (a later update, say)
+  // would have its code elsewhere, so the tools leave it alone.
+  if (util::offsets::DetectBuild() == util::offsets::GameBuild::Unknown)
+  {
+    util::log::Error("This AI.exe is not a release the tools know");
+    MessageBoxA(NULL, "Warning - this AI.exe is not a build Cinematic Tools know (they support the Steam, GOG and Epic Games Store releases of Alien: Isolation), so they have not started.", "Cinematic Tools", MB_ICONWARNING);
+    return false;
+  }
+  util::log::Write("Game release: %s", util::offsets::BuildName());
+
+  // The game can still be starting up when the tools are injected (the Epic Games Store release restarts itself
+  // through the launcher first), so wait for its renderer: a minute at most.
+  CATHODE::D3D* pD3D = CATHODE::D3D::Singleton();
+  for (int i = 0; i < 600 && !(pD3D && pD3D->m_pDevice && pD3D->m_pSwapChain); ++i)
+  {
+    Sleep(100);
+    pD3D = CATHODE::D3D::Singleton();
+  }
+
+  if (pD3D)
+  {
+    g_dxgiSwapChain = pD3D->m_pSwapChain;//fb::DxRenderer::Singleton()->m_pScreen->m_pSwapChain; // Fetch SwapChain
+    g_d3d11Device = pD3D->m_pDevice;// fb::DxRenderer::Singleton()->m_pDevice; // Fetch ID3D11Device
+  }
   if (g_d3d11Device)
     g_d3d11Device->GetImmediateContext(&g_d3d11Context);
 
@@ -100,7 +122,7 @@ bool Main::Initialize()
 
   // This disables the object glow thing
   BYTE GlowPatch[7] = { 0x80, 0xB9, 0x65, 0x70, 0x02, 0x00, 0x01 };
-  util::WriteMemory((int)g_gameHandle + 0x3A3494, GlowPatch, 7);
+  util::WriteMemory(util::offsets::GetOffset("OFFSET_GLOWPATCH"), GlowPatch, 7);
 
   // Make timescale writable
   DWORD dwOld = 0;

@@ -57,6 +57,19 @@ namespace util
       Signature(std::string const& sig, int offset = 0);
     };
 
+    // The releases of the game the tools have offsets for
+    enum class GameBuild
+    {
+      Unknown,
+      Steam,
+      GOG,
+      Epic
+    };
+
+    // Works out which release AI.exe is, from its header. The offsets come from that release.
+    GameBuild DetectBuild();
+    const char* BuildName();
+
     void Scan();
     int GetOffset(std::string const& name);
   }

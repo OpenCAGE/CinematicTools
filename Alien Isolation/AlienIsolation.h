@@ -358,7 +358,11 @@ namespace CATHODE
   static void ShowMouse(bool val)
   {
     int ptr1 = *(int*)(util::offsets::GetOffset("OFFSET_SHOWMOUSE"));
+    if (!ptr1)
+      return;
     int ptr2 = *(int*)(ptr1 + 0x4A70);
+    if (!ptr2)
+      return;
 
     bool* pShowMouse = (bool*)(ptr2 + 0x10);
     *pShowMouse = !val;
